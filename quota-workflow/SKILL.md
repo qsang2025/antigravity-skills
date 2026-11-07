@@ -112,45 +112,50 @@ mapping" above). If Step 0 fails (e.g. the strong model has no quota left
 at all), stop, report it, and use the fallback: ask another strong agent
 to plan (for example Muse), then execute with the cheap model.
 
-### Step 1 — Take the task (flash sub-agent)
+### Step 1 — Take the task and prepare a context bundle (ONE "Recon Sub-agent" dispatch)
 
 1. The user gives the task.
-2. Dispatch a flash sub-agent (`TypeName: "self"`, `Workspace:
-   "inherit"`, `Model: "flash"`) to record it in
-   `<repo>/.agents/plans/<date>-<task>-REQUEST.md`: goal, repo, branch,
-   definition of done, and what must NOT be done. This is mechanical
-   work — the master (strong model) does not spend a call on it.
-3. **Do not start coding yet.** The first thing after taking a task is to
+2. Dispatch **ONE** flash sub-agent (`TypeName: "self"`, `Workspace:
+   "inherit"`, `Model: "flash"`) — the "Recon Sub-agent" — to do both
+   jobs in a single trip:
+   (a) record the task in `<repo>/.agents/plans/<date>-<task>-REQUEST.md`:
+   goal, repo, branch, definition of done, and what must NOT be done;
+   (b) survey the repo and prepare a short **context bundle** file,
+   `<repo>/.agents/plans/<task>-CONTEXT.md`, at most 1–2 pages,
+   containing:
+   - The repo layout that matters (paths, what each file/folder does).
+   - The project's house rules (the mandatory ones, with paths to the
+     source files). See "Project adapter" below — read the project's own
+     rule files and summarise them here; do not hard-code one project's
+     rules into this skill.
+   - Verified facts (URLs, numbers, observed behaviour of external sites).
+   - Constraints (files that must not be touched, routes already tried and
+     blocked, secrets that must never be pasted anywhere).
+   This is mechanical work — the master (strong model) does not spend a
+   call on it.
+3. The master only wakes up when the Recon Sub-agent reports back, then
+   reads the context bundle and writes the plan (Step 2). Do NOT split
+   this into two separate dispatches (one to record the request, one to
+   prepare the bundle): each dispatch wakes the master and costs one
+   strong-model turn, so two dispatches waste one turn in between.
+4. **Do not start coding yet.** The first thing after taking a task is to
    plan, not to write code.
 
-### Step 1.5 — Prepare a context bundle (flash sub-agent, before Step 2)
-
-The master planner works from this bundle, and the executor works from
-the plan + bundle without re-reading the whole repo. Dispatch a flash
-sub-agent (`TypeName: "self"`, `Workspace: "inherit"`,
-`Model: "flash"`) to prepare a short **context bundle** file,
-`<repo>/.agents/plans/<task>-CONTEXT.md`, at most 1–2 pages, containing:
-
-- The repo layout that matters (paths, what each file/folder does).
-- The project's house rules (the mandatory ones, with paths to the source
-  files). See "Project adapter" below — read the project's own rule files
-  and summarise them here; do not hard-code one project's rules into this
-  skill.
-- Verified facts (URLs, numbers, observed behaviour of external sites).
-- Constraints (files that must not be touched, routes already tried and
-  blocked, secrets that must never be pasted anywhere).
-
-Give the bundle to the master planner (Step 2). Steps 1 and 1.5 run on
-the cheap model so the master (strong model) spends only 2–3 calls in
-total: reading the bundle, writing the plan, and reviewing it.
+The master planner works from the context bundle, and the executor works
+from the plan + bundle without re-reading the whole repo. The Recon
+Sub-agent runs on the cheap model, so the master spends only one turn
+waking up to read the bundle — then Step 2 (plan + review + dispatch)
+runs in that same turn.
 
 ### Step 2 — Plan with the strong model (inside Antigravity)
 
 The master (strong model) writes the plan. This is the master's main
-job — 1–2 strong-model calls, no more.
+job — 1 strong-model turn: plan, review (Step 3), write, dispatch, all
+in the same turn. (A rewrite after a failed review is the only
+exception, and it costs one more turn.)
 
 1. Give the master the task description and the context bundle (Step
-   1.5). The master runs on the strong model (Gemini 4 Argon Medium,
+   1). The master runs on the strong model (Gemini 4 Argon Medium,
    tier `pro`); it does not switch models.
 2. The plan follows `templates/plan-template.md` — five mandatory
    sections: (1) Goal, (2) Context the executor needs, (3) Numbered
@@ -164,20 +169,32 @@ job — 1–2 strong-model calls, no more.
    plan into numbered parts with end markers: `write_to_file` writes
    directly to the VM disk, so there is no clipboard truncation to work
    around, and one complete file is faster and cheaper than several
-   partial calls. Then **commit the plan file immediately** (so it
-   survives quota cuts and session errors).
-4. Do not edit the plan yourself — if it is incomplete or wrong, ask the
-   strong model again for the missing section (one more strong-model call
-   is still cheaper than executing a wrong plan).
+   partial calls.
+4. Do the review (Step 3), the write, and the first dispatch **in this
+   same turn** — review the plan against the checklist (Step 3) yourself,
+   call `write_to_file` to write the plan, and dispatch the first flash
+   sub-agent (`TypeName: "self"`, `Workspace: "inherit"`,
+   `Model: "flash"`) for the first execution step cluster. Do NOT commit
+   the plan file yourself and do NOT wait for the write to finish before
+   dispatching: the first sub-agent commits the plan file as Step 0 of
+   the Plan (see `templates/plan-template.md`) before starting its
+   cluster, so the plan survives quota cuts and session errors without
+   costing the master an extra turn. Target: the whole Plan + Review +
+   Dispatch phase costs the master **exactly 1 turn** on the strong
+   model.
 
 ### Step 3 — Review the plan (short, mandatory)
+
+Do this review **in the same Master turn as Step 2** (see Step 2 item
+4) — never a separate turn.
 
 1. Review the plan against the review checklist (see `WORKFLOW.md`).
    In particular, check that every assumption in the plan is either
    verified (with evidence) or marked NEEDS VERIFICATION — an unverified
    assumption is a plan defect, not a detail.
 2. If the plan is missing steps, missing verification, or contradicts the
-   project's house rules, go back to Step 2.
+   project's house rules, go back to Step 2 (a rewrite costs one more
+   turn — write it right the first time).
 3. Only a plan that passes the checklist may be executed. This review costs
    a few minutes and saves hours of rework.
 
@@ -191,16 +208,23 @@ flash sub-agents — the session model does not switch.
    and run the clusters **sequentially, one at a time** — never in
    parallel on the same repo (see the Git rules below). A step cluster is
    a group of related plan steps (e.g. Steps 1–4 of one extension build).
+   The first sub-agent commits the plan file as Step 0 of the Plan before
+   starting its cluster (see `templates/plan-template.md`).
 2. Each sub-agent reads the plan file and does its steps **in order**,
    without adding steps, changing scope, or "improving" the plan.
-3. Before each step, the sub-agent **echoes** it ("Doing Step N per the
+3. **Never edit the plan's Goal or Steps yourself** — only the Progress
+   section (item 5) is yours to update. If the plan is incomplete,
+   wrong, or contradicts itself, STOP and report back to the Master —
+   the Master fixes the plan. (This rule was in Step 2 in v3, aimed at
+   the wrong role: the actor at Step 2 is the Master itself.)
+4. Before each step, the sub-agent **echoes** it ("Doing Step N per the
    plan; rule applied: ...") so non-compliance is visible.
-4. After each step: update the **Progress** section of the plan file (what
+5. After each step: update the **Progress** section of the plan file (what
    was done, evidence, time) and **commit the progress** — so if quota runs
    out mid-task, the next session resumes from exactly that step.
-5. If something in the plan is ambiguous → **STOP and ask**. Do not guess;
+6. If something in the plan is ambiguous → **STOP and ask**. Do not guess;
    a weak model guessing wrong costs more quota to fix than asking.
-6. If an error is outside the plan → record it in the plan file, stop at
+7. If an error is outside the plan → record it in the plan file, stop at
    that step, report. Do not expand scope to "fix it anyway".
 
 ### Step 5 — Verify (a gate, never skipped)
@@ -346,6 +370,18 @@ plan. See `examples/vbook-extension.md` for a worked example.
 
 ## Changelog
 
+- v3.1 (2026-11-08): AG re-review micro-optimisations (3, to save
+  strong-model turns). Step 1 + Step 1.5 merged into ONE "Recon
+  Sub-agent" dispatch (record REQUEST.md + prepare CONTEXT.md in a single
+  trip; the Master wakes only once — two separate dispatches would waste
+  one strong-model turn in between). The Plan + Review + Dispatch phase
+  costs the Master exactly 1 turn: Step 2 reviews (Step 3), writes the
+  plan, and dispatches the first flash sub-agent in the same turn; the
+  first sub-agent commits the plan file as Step 0 of the Plan (the Master
+  no longer commits it). The "Do not edit the plan yourself" rule moved
+  from Step 2 to Step 4, where it belongs: sub-agents never edit the
+  plan's Goal/Steps, only the Progress section; if the plan is wrong,
+  they report back to the Master.
 - v3 (2026-11-08): AG review fixes. Dispatch uses `TypeName: "self"` +
   `Workspace: "inherit"` + explicit `Model: "flash"` everywhere (never
   `TypeName: "research"` for gathering/network steps — its sandbox is

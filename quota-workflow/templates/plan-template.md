@@ -24,10 +24,10 @@
 ## 3. Execution steps
 
 ### Step 0: Sync & check assumptions (always first)
-- What to do: `git pull --rebase`, record the current HEAD commit, and check the plan's assumptions (file paths, versions, external sites) still hold.
-- Expected result: HEAD recorded; all assumptions confirmed.
-- How to verify: `git log --oneline -1` output matches the recorded HEAD.
-- Done when: HEAD is recorded and every assumption is confirmed — or, if anything drifted, STOP and report.
+- What to do: first **commit the plan file** — the Master wrote it but did not commit it; committing is your first job, so the plan survives quota cuts and session errors (include the REQUEST/CONTEXT files too if they are not yet committed). Then `git pull --rebase`, record the current HEAD commit, and check the plan's assumptions (file paths, versions, external sites) still hold.
+- Expected result: plan file committed; HEAD recorded; all assumptions confirmed.
+- How to verify: `git log --oneline -1` output matches the recorded HEAD; `git status` shows a clean tree.
+- Done when: the plan file is committed, HEAD is recorded and every assumption is confirmed — or, if anything drifted, STOP and report.
 - Rationale: the repo changes constantly; a plan written hours ago can be wrong by execution time.
 
 ### Step 1: <step name>

@@ -93,34 +93,35 @@ Do NOT verify anything through the Gemini web app
 If Step 0 fails, stop, report, and use a fallback: ask another strong
 agent to plan (for example Muse), then execute with the cheap model.
 
-### Step 1 — Take the task
+### Step 1 — Take the task and prepare a context bundle (ONE "Recon Sub-agent" dispatch)
 
-- Dispatch a flash sub-agent (`TypeName: "self"`, `Workspace:
-  "inherit"`, `Model: "flash"`) to record the task in
-  `<repo>/.agents/plans/<date>-<task>-REQUEST.md`: goal, repo, branch,
-  definition of done, and what must NOT be done. This is mechanical work
-  — the master (strong model) does not spend a call on it.
-- Do not start coding yet.
+Dispatch **ONE** flash sub-agent (`TypeName: "self"`, `Workspace:
+"inherit"`, `Model: "flash"`) — the "Recon Sub-agent" — to do both jobs
+in a single trip:
 
-### Step 1.5 — Prepare a context bundle
+- Record the task in `<repo>/.agents/plans/<date>-<task>-REQUEST.md`:
+  goal, repo, branch, definition of done, and what must NOT be done.
+- Survey the repo and prepare a context bundle file,
+  `<repo>/.agents/plans/<task>-CONTEXT.md`, at most 1–2 pages (see
+  `templates/context-bundle-template.md`): repo layout that matters,
+  project house rules (summarised, with paths to the source files),
+  verified facts, constraints, and what must not be done.
 
-The master planner works from this bundle, and the executor works from
-the plan + bundle without re-reading the whole repo. Dispatch a flash
-sub-agent (`TypeName: "self"`, `Workspace: "inherit"`,
-`Model: "flash"`) to prepare a context bundle file,
-`<repo>/.agents/plans/<task>-CONTEXT.md`, at most 1–2 pages (see
-`templates/context-bundle-template.md`):
-
-- Repo layout that matters, project house rules (summarised, with paths to
-  the source files), verified facts, constraints, and what must not be done.
-- Give the bundle to the master planner (Step 2). Steps 1 and 1.5 run on
-  the cheap model so the master (strong model) spends only 2–3 calls in
-  total: reading the bundle, writing the plan, and reviewing it.
+This is mechanical work — the master (strong model) does not spend a call
+on it. The master only wakes up when the Recon Sub-agent reports back,
+then reads the bundle and writes the plan (Step 2). Do NOT split this
+into two separate dispatches: each dispatch wakes the master and costs
+one strong-model turn, so two dispatches waste one turn in between.
+The master planner works from the bundle, and the executor works from
+the plan + bundle without re-reading the whole repo. Do not start coding
+yet — the first thing after taking a task is to plan, not to write code.
 
 ### Step 2 — Plan with the strong model
 
 The master (strong model) writes the plan. This is the master's main
-job — 1–2 strong-model calls, no more.
+job — 1 strong-model turn: plan, review (Step 3), write, dispatch, all
+in the same turn. (A rewrite after a failed review is the only
+exception, and it costs one more turn.)
 
 - Give the master the task description and the context bundle. The master
   runs on the strong model (Gemini 4 Argon Medium, tier `pro`); it does
@@ -134,14 +135,22 @@ job — 1–2 strong-model calls, no more.
   call** — `<repo>/.agents/plans/<date>-<task>.md`. Do NOT split the plan
   into numbered parts with end markers: `write_to_file` writes directly
   to the VM disk, so there is no clipboard truncation to work around.
-  Then **commit it immediately**.
-- Do not edit the plan yourself — if it is incomplete or wrong, ask the
-  strong model again for the missing section.
+- Do the review (Step 3), the write, and the first dispatch **in this
+  same turn** — review the plan against the checklist (Step 3), call
+  `write_to_file` to write the plan, and dispatch the first flash
+  sub-agent (`TypeName: "self"`, `Workspace: "inherit"`,
+  `Model: "flash"`) for the first execution step cluster. Do NOT commit
+  the plan file yourself and do NOT wait for the write to finish before
+  dispatching: the first sub-agent commits the plan file as Step 0 of
+  the Plan (see `templates/plan-template.md`) before starting its
+  cluster. Target: the whole Plan + Review + Dispatch phase costs the
+  master **exactly 1 turn** on the strong model.
 
 ### Step 3 — Review the plan
 
-Review against the checklist below. If the plan fails any item, go back to
-Step 2. Only a plan that passes may be executed.
+Review against the checklist below — **in the same Master turn as Step
+2**, never a separate turn. If the plan fails any item, go back to Step 2
+(a rewrite costs one more turn). Only a plan that passes may be executed.
 
 **Review checklist**
 
@@ -171,9 +180,16 @@ flash sub-agents — the session model does not switch.
   (`TypeName: "self"`, `Workspace: "inherit"`, `Model: "flash"`), and
   run the clusters **sequentially, one at a time** — never in parallel
   on the same repo (see the Git rules below). A step cluster is a group
-  of related plan steps (e.g. Steps 1–4 of one extension build).
+  of related plan steps (e.g. Steps 1–4 of one extension build). The
+  first sub-agent commits the plan file as Step 0 of the Plan before
+  starting its cluster (see `templates/plan-template.md`).
 - Each sub-agent does the plan steps **in order**, without adding steps,
   changing scope, or "improving" the plan.
+- **Never edit the plan's Goal or Steps yourself** — only the Progress
+  section is yours to update. If the plan is incomplete, wrong, or
+  contradicts itself, STOP and report back to the Master — the Master
+  fixes the plan. (This rule was in Step 2 in v3, aimed at the wrong
+  role: the actor at Step 2 is the Master itself.)
 - Before each step, the sub-agent **echoes** it ("Doing Step N per the
   plan; rule applied: ...") so non-compliance is visible.
 - After each step: update the **Progress** section of the plan file (what
@@ -387,6 +403,12 @@ differently.)_
 
 ## Changelog
 
+- v3.1 (2026-11-08): AG re-review micro-optimisations (3, to save
+  strong-model turns) — same changes as SKILL.md v3.1: Step 1 + Step 1.5
+  merged into ONE "Recon Sub-agent" dispatch; Plan + Review + Dispatch
+  costs the Master exactly 1 turn, with the first flash sub-agent
+  committing the plan file as Step 0 of the Plan; the "Do not edit the
+  plan yourself" rule moved from Step 2 to Step 4.
 - v3 (2026-11-08): AG review fixes — same changes as SKILL.md v3
   (explicit `TypeName: "self"` + `Workspace: "inherit"` +
   `Model: "flash"` on every dispatch; flash sub-agents for Steps 1/1.5;
