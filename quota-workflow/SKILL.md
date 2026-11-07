@@ -1,15 +1,15 @@
 ---
 name: quota-workflow
-description: Work on a large task without dying when the strong model's quota runs out. Use this skill for any task estimated at more than 30 minutes or with 3+ dependent steps, especially when the strong model (e.g. Gemini 4) has scarce quota and a cheaper model (e.g. Gemini 3.8) has plenty. Plan with the strong model outside the agent (in the Gemini web app), save the plan as a file in the repo, then execute it step by step with the cheap model, with sub-agents reporting back to a master agent through files.
+description: Work on a large task without dying when the strong model's quota runs out. Use this skill for any task estimated at more than 30 minutes or with 3+ dependent steps, especially when the strong model (e.g. Gemini 4 Argon) has scarce quota and a cheaper model (e.g. Gemini 3.8 Flash) has plenty. Plan with the strong model inside the agent (a few calls only), save the plan as a file in the repo, then execute it step by step with the cheap model, with sub-agents reporting back to a master agent through files.
 ---
 
 # quota-workflow
 
 ## The idea in one line
 
-Use the strong model **only to plan** — do that outside the agent, in the
-Gemini web app — then let the cheap model **execute the plan file** inside the
-agent. The plan file is the contract between planner and executor.
+Use the strong model **only to plan** (a few calls, inside the agent) —
+then let the cheap model **execute the plan file**. The plan file is the
+contract between planner and executor.
 
 ## When to use this skill
 
@@ -20,6 +20,29 @@ agent. The plan file is the contract between planner and executor.
 
 Do **not** use this workflow for small tasks (< 30 minutes, 1–2 simple
 steps) — do those directly, the planning overhead is not worth it.
+
+## Model mapping (Antigravity)
+
+- **Master / planner: strong model** — Gemini 4 Argon Medium (the
+  `pro` tier). Use it only for planning (1–2 calls) and master decisions.
+  Planning is cheap in calls, so the strong model's small quota is enough
+  for this role.
+- **Executor / sub-agents: cheap model** — Gemini 3.8 Flash Medium (the
+  `flash` tier). All bulk work runs here.
+- **How the model is chosen:** Antigravity's sub-agent call
+  (`invoke_subagent`) takes a `Model` parameter with four values:
+  `inherit` (same model as the master), `pro`, `flash`, `flash_lite`.
+  Dispatch sub-agents with `Model: "flash"`; the master runs on `pro`.
+  Models are chosen **by tier, not by version name** — there is no way to
+  pass a name like "Gemini 3.8" directly.
+- **Model names change over time.** Record the exact names the UI shows
+  when you verify (Step 0) and use those.
+- **Do NOT route planning through the Gemini web app**
+  (`gemini.google.com/app`). Verified 2026-11-08: the agent runs in an
+  isolated cloud VM with no Google sign-in, and Google blocks sign-in
+  from that VM's headless browser ("This browser or app may not be
+  secure"), so the agent cannot use the web app at all — signed in or
+  guest. Planning happens inside Antigravity on the strong model.
 
 ## Principles
 
@@ -39,25 +62,31 @@ steps) — do those directly, the planning overhead is not worth it.
 ### Step 0 — Verify once (before trusting the workflow)
 
 Do this once, before relying on the workflow for real work. Record the
-results in the project workflow file.
+results in the project workflow file (section "Verified").
 
-1. Open `https://gemini.google.com/app` in the browser, signed in with the
-   Google account that has Gemini access.
-2. Confirm the strong model is available there (record the exact model name
-   shown in the UI — names change over time; use what the UI shows).
-3. Confirm that account's limits in the Gemini app (free or paid, roughly
-   how many prompts per day). If the limit is very low, record the number.
-4. Confirm the agent can **copy a long text** (~2,000 words) out of the
-   Gemini app and **save it as a file** in the repo.
-5. Confirm the agent can switch models in Antigravity (strong ↔ cheap) and
-   that the cheap model's quota is sufficient for execution work.
-6. Confirm whether Antigravity allows a **different model per sub-agent**
-   (master on strong, sub-agents on cheap at the same time). If not, use
-   the two-phase model-switching fallback (see "Master / sub-agent" below).
+1. Confirm the strong model is available in Antigravity's model menu
+   (record the exact model name shown in the UI — names change over time;
+   use what the UI shows). Currently: **Gemini 4 Argon Medium**.
+2. Confirm that model's quota (weekly and 5-hour limits, % remaining, when
+   it resets). Planning costs only 1–2 calls, so even a small remaining
+   quota is enough for the planner role — but record the numbers.
+3. Confirm the cheap model is available in Antigravity (currently:
+   **Gemini 3.8 Flash Medium**) and its quota is sufficient for execution
+   work (bulk calls).
+4. Confirm Antigravity allows a **different model per sub-agent** (master
+   on strong, sub-agents on cheap at the same time). Verified 2026-11-08:
+   yes — the sub-agent call takes a `Model` parameter (`inherit` / `pro` /
+   `flash` / `flash_lite`). If this ever stops working, use the two-phase
+   model-switching fallback (see "Master / sub-agent" below).
+5. Confirm the agent can save a long plan text as a file in the repo
+   (the plan file is the contract — if it cannot be saved, the workflow
+   does not work).
 
-If Step 0 fails (e.g. the Gemini app is unreachable, or the account has no
-strong model), stop, report it, and use the fallback: ask another strong
-agent to plan (for example Muse), then execute with the cheap model.
+Do NOT verify anything through the Gemini web app
+(`gemini.google.com/app`): the agent cannot sign in there (see "Model
+mapping" above). If Step 0 fails (e.g. the strong model has no quota left
+at all), stop, report it, and use the fallback: ask another strong agent
+to plan (for example Muse), then execute with the cheap model.
 
 ### Step 1 — Take the task (any model)
 
@@ -69,7 +98,8 @@ agent to plan (for example Muse), then execute with the cheap model.
 
 ### Step 1.5 — Prepare a context bundle (before Step 2)
 
-The planner (Gemini web app) cannot read the repo. Prepare a short
+The master planner works from this bundle, and the executor works from
+the plan + bundle without re-reading the whole repo. Prepare a short
 **context bundle** file, `<repo>/.agents/plans/<task>-CONTEXT.md`, at most
 1–2 pages, containing:
 
@@ -82,14 +112,17 @@ The planner (Gemini web app) cannot read the repo. Prepare a short
 - Constraints (files that must not be touched, routes already tried and
   blocked, secrets that must never be pasted anywhere).
 
-If the Gemini app supports file upload, upload the bundle (and the rule
-files) instead of pasting text.
+Give the bundle to the master planner together with the planning prompt
+(Step 2).
 
-### Step 2 — Plan with the strong model (in the Gemini web app)
+### Step 2 — Plan with the strong model (inside Antigravity)
 
-1. Open `https://gemini.google.com/app` in the browser.
-2. Paste the planning prompt (see `templates/planning-prompt.md`) with the
-   task description and the context bundle.
+1. Switch the session model to the **strong model** (Gemini 4 Argon
+   Medium, tier `pro`). Planning costs only 1–2 calls, so use the strong
+   model for this step even though its quota is small.
+2. Give the master the planning prompt (see
+   `templates/planning-prompt.md`) with the task description and the
+   context bundle (Step 1.5).
 3. The strong model returns a plan following the plan template (see
    `templates/plan-template.md`). Ask for the plan in **several numbered
    parts, each ending with a clear marker** (e.g. `--- END OF PART 1 ---`),
@@ -111,7 +144,8 @@ files) instead of pasting text.
 
 ### Step 4 — Execute with the cheap model (in Antigravity)
 
-1. Switch the Antigravity model to the **cheap model**.
+1. Switch the Antigravity model to the **cheap model** (Gemini 3.8
+   Flash Medium, tier `flash`). Dispatch sub-agents with `Model: "flash"`.
 2. Read the plan file and do the steps **in order**, without adding steps,
    changing scope, or "improving" the plan.
 3. Before each step, **echo** it ("Doing Step N per the plan; rule
@@ -143,9 +177,9 @@ files) instead of pasting text.
 
 ## Quota rules (memorise these)
 
-1. **Never start a large task directly on the strong model inside the
-   agent.** Always plan first (via the Gemini app), then execute on the
-   cheap model.
+1. **Use the strong model only for planning and master decisions —
+   never for bulk execution.** Plan first (Step 2, on the strong model),
+   then execute on the cheap model.
 2. **Strong-model quota exhausted → do not retry in a loop.** Switch to the
    cheap model and work from an existing plan, or plan small tasks on the
    cheap model (note clearly that the plan is lower quality and needs a
@@ -165,8 +199,9 @@ files) instead of pasting text.
    quota is plentiful, or the task is large enough to justify it.
 8. **Always commit progress after each step.** The plan file + progress is
    the save point — without a save point, a quota cut loses everything.
-9. **Never paste secrets, credentials, tokens, passwords, or API keys into
-   the Gemini web app.** Only code, rules, and task descriptions.
+9. **Never paste secrets, credentials, tokens, passwords, or API keys
+   into any web app or chat outside the agent.** Only code, rules, and
+   task descriptions.
 10. **If a session fills its context or starts forgetting, stop, commit
     progress, and open a new session** with the starter message + the plan
     file path — the new session resumes from the file.
@@ -205,13 +240,17 @@ files) instead of pasting text.
   external site blocks or changed structure, a scope decision is needed,
   quota is exhausted, or the same error survived 2 fix attempts ("try twice"
   rule: attempt a fix at most twice; the third time, stop and report).
-- **Model question (verify in Step 0):** if Antigravity does NOT allow a
-  different model per sub-agent, use the two-phase fallback: the master
-  (strong model) plans and dispatches, then the WHOLE session switches to
-  the cheap model for execution; when a master decision is needed, switch
-  back to the strong model, decide, then switch back to cheap. This still
-  saves quota (the strong model only wakes for decisions) but requires
-  switching models back and forth.
+- **Model choice (verified 2026-11-08):** Antigravity DOES allow a
+  different model per sub-agent — the sub-agent call takes a `Model`
+  parameter (`inherit` / `pro` / `flash` / `flash_lite`). The master runs
+  on `pro` (Gemini 4 Argon Medium); sub-agents are dispatched with
+  `Model: "flash"` (Gemini 3.8 Flash Medium). Models are chosen by tier,
+  not by version name. If per-sub-agent choice ever stops working, use
+  the two-phase fallback: the master (strong model) plans and dispatches,
+  then the WHOLE session switches to the cheap model for execution; when
+  a master decision is needed, switch back to the strong model, decide,
+  then switch back to cheap. This still saves quota (the strong model
+  only wakes for decisions) but requires switching models back and forth.
 
 ## Project adapter (fill this in per project — never hard-code one project's rules into the skill core)
 
@@ -237,11 +276,17 @@ plan. See `examples/vbook-extension.md` for a worked example.
 - Tasks under ~30 minutes or with 1–2 simple steps: do them directly.
 - Tasks that cannot be split into verifiable steps (pure exploration,
   open-ended research): use the skill's planning part only, loosely.
-- The strong model is unavailable everywhere (no Gemini app access and no
-  other strong agent): plan with the cheap model for small tasks only, and
-  flag the plan as lower quality.
+- The strong model is unavailable in Antigravity (quota exhausted and
+  no other strong agent to plan): plan with the cheap model for small
+  tasks only, and flag the plan as lower quality.
 
 ## Changelog
 
+- v2 (2026-11-08): master plans inside Antigravity on Gemini 4 Argon
+  Medium; sub-agents execute on the flash tier (Gemini 3.8 Flash Medium).
+  The Gemini web app step is REMOVED — Phase 0 verification (2026-11-08)
+  proved the agent cannot sign in there (Google blocks the VM's headless
+  browser). Per-sub-agent model choice confirmed by tier
+  (`inherit`/`pro`/`flash`/`flash_lite`).
 - v1 (2026-11-08): first version. Split from the training plan
   `antigravity-quota-training-plan.md` (Parts 1–3).

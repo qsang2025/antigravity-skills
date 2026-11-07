@@ -1,8 +1,8 @@
 # Plan: <task name>
 - Date: <YYYY-MM-DD>
 - Repo: <repo URL, branch>
-- Planner: strong model (via the Gemini web app, `https://gemini.google.com/app`)
-- Executor: Antigravity, cheap model
+- Planner: master agent, strong model (Gemini 4 Argon Medium, inside Antigravity)
+- Executor: Antigravity, cheap model (Gemini 3.8 Flash Medium)
 - Request file: <path to the REQUEST file, if any>
 - Context bundle: <path to the CONTEXT file, if any>
 

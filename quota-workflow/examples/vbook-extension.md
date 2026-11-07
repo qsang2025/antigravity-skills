@@ -66,5 +66,6 @@ three Vietnamese extensions (truyenc, metruyenchu, truyenhoan) plus
 sangtacviet directly on the strong model. It died on quota ("Individual
 quota reached") after producing only 18 coordination documents and 0 lines
 of extension code — no commit, no push. That failure is why this skill
-exists: plan with the strong model (cheaply, outside the agent), execute
-with the cheap model (which has more quota), and keep progress in files.
+exists: plan with the strong model inside the agent (only a few calls for
+planning), execute with the cheap model (which has more quota), and keep
+progress in files.

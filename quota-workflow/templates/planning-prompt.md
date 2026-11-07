@@ -1,7 +1,8 @@
-# Planning prompt (paste into the Gemini web app)
+# Planning prompt (for the master agent, inside Antigravity)
 
-Copy the block below, fill in the `<placeholders>`, and paste it into
-`https://gemini.google.com/app` together with the context bundle (see
+Use this prompt when asking the master agent — running on the strong model
+(Gemini 4 Argon Medium) inside Antigravity — to write the plan. Fill in the
+`<placeholders>` and give it together with the context bundle (see
 `context-bundle-template.md`).
 
 ```

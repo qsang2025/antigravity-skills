@@ -1,9 +1,8 @@
 # Context bundle: <task name>
 
-Purpose: everything the planner (strong model, in the Gemini web app — it
-cannot read the repo) needs to write a good plan. Keep it to 1–2 pages.
-Paste this into the Gemini app together with the planning prompt, or upload
-it (and the rule files listed below) if the app supports file upload.
+Purpose: everything the planner (master agent, strong model) needs to
+write a good plan. Keep it to 1–2 pages. Give this to the master agent
+together with the planning prompt (see `planning-prompt.md`).
 
 - Date: <YYYY-MM-DD>
 - Repo: <repo URL, branch>
@@ -31,8 +30,8 @@ behaviour. Mark anything uncertain as NEEDS VERIFICATION.)_
 - Files that must NOT be touched: ...
 - Routes already tried and blocked (do not retry): ...
 - Secrets / credentials: NEVER paste any secret, token, password, or API
-  key into the Gemini web app.
+  key into any web app or chat outside the agent.
 
-## 5. Source files (for upload or reference)
+## 5. Source files (for reference)
 - `<path to rule file 1>`
 - `<path to rule file 2>`
