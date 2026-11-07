@@ -26,15 +26,24 @@ steps) — do those directly, the planning overhead is not worth it.
 - **Master / planner: strong model** — Gemini 4 Argon Medium (the
   `pro` tier). Use it only for planning (1–2 calls) and master decisions.
   Planning is cheap in calls, so the strong model's small quota is enough
-  for this role.
+  for this role. The master stays on the strong model for the whole task;
+  it does not switch models — execution is done by dispatching sub-agents.
 - **Executor / sub-agents: cheap model** — Gemini 3.8 Flash Medium (the
   `flash` tier). All bulk work runs here.
-- **How the model is chosen:** Antigravity's sub-agent call
+- **How a sub-agent is dispatched:** Antigravity's sub-agent call
   (`invoke_subagent`) takes a `Model` parameter with four values:
   `inherit` (same model as the master), `pro`, `flash`, `flash_lite`.
-  Dispatch sub-agents with `Model: "flash"`; the master runs on `pro`.
-  Models are chosen **by tier, not by version name** — there is no way to
-  pass a name like "Gemini 3.8" directly.
+  Always dispatch with all three set explicitly:
+  `TypeName: "self"`, `Workspace: "inherit"`, `Model: "flash"`.
+  - `TypeName: "self"` is the only valid type for execution steps.
+    Never use `TypeName: "research"` for gathering or network checks —
+    the research sub-agent runs in a read-only sandbox with no network
+    access and cannot fetch anything.
+  - `Model` defaults to `"inherit"` if you omit it — a sub-agent
+    dispatched without `Model` silently runs on the strong model and
+    burns its scarce quota. Always write `Model: "flash"` explicitly.
+  - Models are chosen **by tier, not by version name** — there is no way
+    to pass a name like "Gemini 3.8" directly.
 - **Model names change over time.** Record the exact names the UI shows
   when you verify (Step 0) and use those.
 - **Do NOT route planning through the Gemini web app**
@@ -67,20 +76,35 @@ results in the project workflow file (section "Verified").
 1. Confirm the strong model is available in Antigravity's model menu
    (record the exact model name shown in the UI — names change over time;
    use what the UI shows). Currently: **Gemini 4 Argon Medium**.
-2. Confirm that model's quota (weekly and 5-hour limits, % remaining, when
-   it resets). Planning costs only 1–2 calls, so even a small remaining
-   quota is enough for the planner role — but record the numbers.
+2. Confirm that model's quota. Read the numbers from Antigravity's
+   **Usage view** (weekly and 5-hour limits, % remaining, when it
+   resets) and record them exactly as shown. Do NOT infer the
+   plan/package from the numbers — the displayed numbers do not reliably
+   identify the package (e.g. 94% weekly remaining was shown on an
+   account whose package is described as a free "gemini 1.5 pro" plan).
+   Planning costs only 1–2 calls, so even a small remaining quota is
+   enough for the planner role — but record the numbers.
 3. Confirm the cheap model is available in Antigravity (currently:
    **Gemini 3.8 Flash Medium**) and its quota is sufficient for execution
-   work (bulk calls).
+   work (bulk calls). Read its numbers from the Usage view too, as in
+   item 2.
 4. Confirm Antigravity allows a **different model per sub-agent** (master
    on strong, sub-agents on cheap at the same time). Verified 2026-11-08:
-   yes — the sub-agent call takes a `Model` parameter (`inherit` / `pro` /
-   `flash` / `flash_lite`). If this ever stops working, use the two-phase
-   model-switching fallback (see "Master / sub-agent" below).
+   yes — dispatch with `TypeName: "self"`, `Workspace: "inherit"`,
+   `Model: "flash"`. The AG agent confirmed it can act as Master on
+   Gemini 4 Argon Medium and call flash-tier sub-agents this way. If this
+   ever stops working, use the two-phase model-switching fallback (see
+   "Master / sub-agent" below).
 5. Confirm the agent can save a long plan text as a file in the repo
    (the plan file is the contract — if it cannot be saved, the workflow
    does not work).
+6. Confirm the sub-agent call itself works as documented: dispatch a
+   test sub-agent with `TypeName: "self"`, `Workspace: "inherit"`,
+   `Model: "flash"` on a trivial task and confirm it runs on the cheap
+   model. Do not assume the call, the parameter names, or the sample
+   values are correct — verify them once, then trust the verified
+   result. Anything still unverified is marked NEEDS VERIFICATION, never
+   assumed.
 
 Do NOT verify anything through the Gemini web app
 (`gemini.google.com/app`): the agent cannot sign in there (see "Model
@@ -88,20 +112,24 @@ mapping" above). If Step 0 fails (e.g. the strong model has no quota left
 at all), stop, report it, and use the fallback: ask another strong agent
 to plan (for example Muse), then execute with the cheap model.
 
-### Step 1 — Take the task (any model)
+### Step 1 — Take the task (flash sub-agent)
 
 1. The user gives the task.
-2. Record it in `<repo>/.agents/plans/<date>-<task>-REQUEST.md`: goal, repo,
-   branch, definition of done, and what must NOT be done.
+2. Dispatch a flash sub-agent (`TypeName: "self"`, `Workspace:
+   "inherit"`, `Model: "flash"`) to record it in
+   `<repo>/.agents/plans/<date>-<task>-REQUEST.md`: goal, repo, branch,
+   definition of done, and what must NOT be done. This is mechanical
+   work — the master (strong model) does not spend a call on it.
 3. **Do not start coding yet.** The first thing after taking a task is to
    plan, not to write code.
 
-### Step 1.5 — Prepare a context bundle (before Step 2)
+### Step 1.5 — Prepare a context bundle (flash sub-agent, before Step 2)
 
 The master planner works from this bundle, and the executor works from
-the plan + bundle without re-reading the whole repo. Prepare a short
-**context bundle** file, `<repo>/.agents/plans/<task>-CONTEXT.md`, at most
-1–2 pages, containing:
+the plan + bundle without re-reading the whole repo. Dispatch a flash
+sub-agent (`TypeName: "self"`, `Workspace: "inherit"`,
+`Model: "flash"`) to prepare a short **context bundle** file,
+`<repo>/.agents/plans/<task>-CONTEXT.md`, at most 1–2 pages, containing:
 
 - The repo layout that matters (paths, what each file/folder does).
 - The project's house rules (the mandatory ones, with paths to the source
@@ -112,31 +140,42 @@ the plan + bundle without re-reading the whole repo. Prepare a short
 - Constraints (files that must not be touched, routes already tried and
   blocked, secrets that must never be pasted anywhere).
 
-Give the bundle to the master planner together with the planning prompt
-(Step 2).
+Give the bundle to the master planner (Step 2). Steps 1 and 1.5 run on
+the cheap model so the master (strong model) spends only 2–3 calls in
+total: reading the bundle, writing the plan, and reviewing it.
 
 ### Step 2 — Plan with the strong model (inside Antigravity)
 
-1. Switch the session model to the **strong model** (Gemini 4 Argon
-   Medium, tier `pro`). Planning costs only 1–2 calls, so use the strong
-   model for this step even though its quota is small.
-2. Give the master the planning prompt (see
-   `templates/planning-prompt.md`) with the task description and the
-   context bundle (Step 1.5).
-3. The strong model returns a plan following the plan template (see
-   `templates/plan-template.md`). Ask for the plan in **several numbered
-   parts, each ending with a clear marker** (e.g. `--- END OF PART 1 ---`),
-   so a long plan can be saved and checked part by part.
-4. Save the plan to `<repo>/.agents/plans/<date>-<task>.md` and **commit
-   the plan file immediately** (so it survives quota cuts and session
-   errors).
-5. Do not edit the plan yourself — if it is incomplete or wrong, ask the
-   strong model again for the missing part (one more strong-model call is
-   still cheaper than executing a wrong plan).
+The master (strong model) writes the plan. This is the master's main
+job — 1–2 strong-model calls, no more.
+
+1. Give the master the task description and the context bundle (Step
+   1.5). The master runs on the strong model (Gemini 4 Argon Medium,
+   tier `pro`); it does not switch models.
+2. The plan follows `templates/plan-template.md` — five mandatory
+   sections: (1) Goal, (2) Context the executor needs, (3) Numbered
+   execution steps (each with what to do, exact files/commands, expected
+   result, how to verify, done criterion), (4) Risks & fallbacks,
+   (5) Definition of done. The template also has a Progress section (the
+   executor updates it) and a Decisions section (the master records
+   decisions there).
+3. Write the plan as **ONE complete file in a single `write_to_file`
+   call** — `<repo>/.agents/plans/<date>-<task>.md`. Do NOT split the
+   plan into numbered parts with end markers: `write_to_file` writes
+   directly to the VM disk, so there is no clipboard truncation to work
+   around, and one complete file is faster and cheaper than several
+   partial calls. Then **commit the plan file immediately** (so it
+   survives quota cuts and session errors).
+4. Do not edit the plan yourself — if it is incomplete or wrong, ask the
+   strong model again for the missing section (one more strong-model call
+   is still cheaper than executing a wrong plan).
 
 ### Step 3 — Review the plan (short, mandatory)
 
 1. Review the plan against the review checklist (see `WORKFLOW.md`).
+   In particular, check that every assumption in the plan is either
+   verified (with evidence) or marked NEEDS VERIFICATION — an unverified
+   assumption is a plan defect, not a detail.
 2. If the plan is missing steps, missing verification, or contradicts the
    project's house rules, go back to Step 2.
 3. Only a plan that passes the checklist may be executed. This review costs
@@ -144,12 +183,18 @@ Give the bundle to the master planner together with the planning prompt
 
 ### Step 4 — Execute with the cheap model (in Antigravity)
 
-1. Switch the Antigravity model to the **cheap model** (Gemini 3.8
-   Flash Medium, tier `flash`). Dispatch sub-agents with `Model: "flash"`.
-2. Read the plan file and do the steps **in order**, without adding steps,
-   changing scope, or "improving" the plan.
-3. Before each step, **echo** it ("Doing Step N per the plan; rule
-   applied: ...") so non-compliance is visible.
+The master stays on the strong model. Execution is done by dispatching
+flash sub-agents — the session model does not switch.
+
+1. Dispatch **ONE flash sub-agent per step cluster**
+   (`TypeName: "self"`, `Workspace: "inherit"`, `Model: "flash"`),
+   and run the clusters **sequentially, one at a time** — never in
+   parallel on the same repo (see the Git rules below). A step cluster is
+   a group of related plan steps (e.g. Steps 1–4 of one extension build).
+2. Each sub-agent reads the plan file and does its steps **in order**,
+   without adding steps, changing scope, or "improving" the plan.
+3. Before each step, the sub-agent **echoes** it ("Doing Step N per the
+   plan; rule applied: ...") so non-compliance is visible.
 4. After each step: update the **Progress** section of the plan file (what
    was done, evidence, time) and **commit the progress** — so if quota runs
    out mid-task, the next session resumes from exactly that step.
@@ -174,6 +219,23 @@ Give the bundle to the master planner together with the planning prompt
    claims), and what is still open.
 3. Add anything newly learned to the "Lessons learned" section of the
    project workflow file.
+
+## Git rules (one repo, one writer at a time)
+
+- **Never run sub-agents in parallel writing to the same repo.**
+  Sub-agents share one `.git` directory through `Workspace: "inherit"`,
+  so parallel writers corrupt each other's work. Dispatch ONE flash
+  sub-agent per step cluster and run the clusters sequentially (Step 4).
+- **Several independent sources in one task** (e.g. several extensions):
+  sub-agents may edit files for different sources, but git commits still
+  run strictly one at a time, sequentially — never two commits at once.
+- **`.agents/plans/` and `.agents/reports/` are working files, not
+  product files.** Commit them on the working branch (they are the save
+  point), but do NOT merge them into the product repo's `main` branch —
+  clean them up before merging, so `main` stays clean and CI is not
+  triggered by plan/report churn. The skill itself
+  (`.agents/skills/`, `.agents/WORKFLOW.md`) is meant to live in the repo
+  and is the exception.
 
 ## Quota rules (memorise these)
 
@@ -241,16 +303,18 @@ Give the bundle to the master planner together with the planning prompt
   quota is exhausted, or the same error survived 2 fix attempts ("try twice"
   rule: attempt a fix at most twice; the third time, stop and report).
 - **Model choice (verified 2026-11-08):** Antigravity DOES allow a
-  different model per sub-agent — the sub-agent call takes a `Model`
-  parameter (`inherit` / `pro` / `flash` / `flash_lite`). The master runs
-  on `pro` (Gemini 4 Argon Medium); sub-agents are dispatched with
-  `Model: "flash"` (Gemini 3.8 Flash Medium). Models are chosen by tier,
-  not by version name. If per-sub-agent choice ever stops working, use
-  the two-phase fallback: the master (strong model) plans and dispatches,
-  then the WHOLE session switches to the cheap model for execution; when
-  a master decision is needed, switch back to the strong model, decide,
-  then switch back to cheap. This still saves quota (the strong model
-  only wakes for decisions) but requires switching models back and forth.
+  different model per sub-agent. Dispatch with `TypeName: "self"`,
+  `Workspace: "inherit"`, `Model: "flash"`. The master runs on `pro`
+  (Gemini 4 Argon Medium); sub-agents run on `flash` (Gemini 3.8 Flash
+  Medium). Models are chosen by tier, not by version name. The AG agent
+  confirmed (2026-11-08) it can act as Master on Gemini 4 Argon Medium
+  and call flash-tier sub-agents this way. If per-sub-agent choice ever
+  stops working, use the two-phase fallback: the master (strong model)
+  plans and dispatches, then the WHOLE session switches to the cheap
+  model for execution; when a master decision is needed, switch back to
+  the strong model, decide, then switch back to cheap. This still saves
+  quota (the strong model only wakes for decisions) but requires
+  switching models back and forth.
 
 ## Project adapter (fill this in per project — never hard-code one project's rules into the skill core)
 
@@ -282,6 +346,19 @@ plan. See `examples/vbook-extension.md` for a worked example.
 
 ## Changelog
 
+- v3 (2026-11-08): AG review fixes. Dispatch uses `TypeName: "self"` +
+  `Workspace: "inherit"` + explicit `Model: "flash"` everywhere (never
+  `TypeName: "research"` for gathering/network steps — its sandbox is
+  read-only with no network; `Model` defaults to `inherit` if omitted).
+  Steps 1/1.5 run on a flash sub-agent so the master spends only 2–3
+  strong-model calls. The plan is written as ONE complete file in a
+  single `write_to_file` call (no more numbered parts with end markers).
+  Git rules added: one writer at a time per repo; `.agents/plans/` +
+  `.agents/reports/` stay off `main`. Step 0 now verifies the sub-agent
+  call and reads quota from the Usage view (never infer the package from
+  the numbers). `templates/planning-prompt.md` removed — the five
+  mandatory plan sections live in SKILL.md + the plan template. Starter
+  message carries an explicit model-choice permission.
 - v2 (2026-11-08): master plans inside Antigravity on Gemini 4 Argon
   Medium; sub-agents execute on the flash tier (Gemini 3.8 Flash Medium).
   The Gemini web app step is REMOVED — Phase 0 verification (2026-11-08)

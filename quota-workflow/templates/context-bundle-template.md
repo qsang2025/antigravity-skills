@@ -1,8 +1,9 @@
 # Context bundle: <task name>
 
 Purpose: everything the planner (master agent, strong model) needs to
-write a good plan. Keep it to 1–2 pages. Give this to the master agent
-together with the planning prompt (see `planning-prompt.md`).
+write a good plan. Keep it to 1–2 pages. Give this to the master agent —
+the master writes the plan following `plan-template.md` (five mandatory
+sections).
 
 - Date: <YYYY-MM-DD>
 - Repo: <repo URL, branch>

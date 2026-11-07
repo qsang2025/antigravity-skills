@@ -23,9 +23,12 @@ one or more of these distribution mechanisms (in priority order):
    Paste this as the first message of a new Antigravity session, replacing
    `<skill>` and `<repo-url>` as needed:
    > Before doing anything, read the skill `<skill>` at `<repo-url>` and
-   > follow it. Do not start coding before you have a reviewed plan file.
-   > If you run out of quota at any step, stop, save progress to the plan
-   > file, commit, and report — do not retry in a loop.
+   > follow it. Use the strong model only for master planning/decisions,
+   > and explicitly dispatch sub-agents with TypeName: 'self',
+   > Workspace: 'inherit', and Model: 'flash' for context gathering and
+   > plan execution. Do not start coding before you have a reviewed plan
+   > file. If you run out of quota at any step, stop, save progress to
+   > the plan file, commit, and report — do not retry in a loop.
 2. **Pointer file in the project (one-time setup per project).**
    Add a small `.agents/WORKFLOW.md` to the project repo containing one line
    pointing at the skill, e.g.:

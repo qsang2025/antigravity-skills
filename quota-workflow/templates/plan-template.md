@@ -6,6 +6,8 @@
 - Request file: <path to the REQUEST file, if any>
 - Context bundle: <path to the CONTEXT file, if any>
 
+<!-- Write the plan as ONE complete file in a single write_to_file call. Do not split it into numbered parts with end markers. -->
+
 ## 1. Goal
 <One short paragraph: what to do, why, and what exists when it is done.>
 

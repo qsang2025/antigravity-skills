@@ -58,6 +58,11 @@ were picked from a ranked shortlist: sto9.com, czbooks.net, shuhaige.tw.
    parallel by two coordinators pushing to the same `main`. Both did
    `git pull --rebase` before pushing, so there was no conflict and no
    force-push.
+   > Note: those were Muse coordinators working in separate workspaces,
+   > not Antigravity sub-agents. Antigravity sub-agents share one `.git`
+   > directory through `Workspace: "inherit"`, so they must NOT work in
+   > parallel on one repo — one flash sub-agent per step cluster, run
+   > sequentially (see the Git rules in `SKILL.md`).
 
 ## The part that motivated this skill (the failure case)
 
