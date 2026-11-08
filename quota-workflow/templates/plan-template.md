@@ -1,8 +1,9 @@
 # Plan: <task name>
 - Date: <YYYY-MM-DD>
 - Repo: <repo URL, branch>
-- Planner: master agent, strong model (Gemini 4 Argon Medium, inside Antigravity)
-- Executor: Antigravity, cheap model (Gemini 3.8 Flash Medium)
+- Planner: External Gemini 4 High (Argon Extended Thinking via MCP gemini-web) [or fallback: Antigravity Internal Pro]
+- Coordinator: Antigravity Primary Agent (Gemini 3.8 Flash)
+- Executor: Antigravity Subagents (Gemini 3.8 Flash)
 - Request file: <path to the REQUEST file, if any>
 - Context bundle: <path to the CONTEXT file, if any>
 

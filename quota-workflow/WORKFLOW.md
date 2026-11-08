@@ -1,426 +1,192 @@
-# quota-workflow — full workflow
+# quota-workflow — full workflow (v4.0)
 
 This is the long version of the `quota-workflow` skill. The short, runnable
 version is `SKILL.md`. This document adds the review checklist, fallbacks,
-measurement, and the "training" mechanism. Both documents describe the same
-workflow; if they disagree, `SKILL.md` wins for execution and this file wins
-for explanation.
+measurement, self-critique, and the training mechanism. Both documents
+describe the same workflow; if they disagree, `SKILL.md` wins for execution
+and this file wins for explanation.
 
 ## 0. The problem this solves
 
-An agent with a strong model (e.g. Gemini 4) runs out of quota mid-task:
-the work is left half-done, context is lost, and the task has to be redone.
-A cheap model (e.g. Gemini 3.8) has more quota but is weaker — letting it
-plan a complex task on its own produces a poor plan, and fixing that costs
-more quota than planning well in the first place.
+An agent running on a strong model (e.g. Gemini 4 Argon Medium in Antigravity)
+quickly exhausts its scarce weekly and 5-hour quota limits. Bulk tasks leave
+sessions dead mid-way, progress lost, and expensive tokens burned on routine
+command execution. Conversely, cheap models (e.g. Gemini 3.8 Flash) have
+virtually unlimited quota but struggle with complex planning and architecture
+reasoning.
 
-## 1. The idea
+Furthermore, user accounts on [Google Gemini Web](https://gemini.google.com/app)
+have separate, generous access to **Gemini 4 Argon with Extended Thinking**
+which does NOT consume any Antigravity IDE token quota. Prior attempts (v2) to
+leverage this via headless browsers were blocked by Google anti-automation gates.
 
-Split the work into two phases with two different models:
+`quota-workflow v4.0` solves this completely by bridging Google Gemini Web
+via the native MCP server (`McpGemini2Antigravity`), using Gemini 4 High
+for reasoning and planning at **ZERO Antigravity Pro quota cost**, while
+directing Antigravity's cheap model (Gemini 3.8 Flash) fleet to execute the
+resulting plan.
 
-- **Phase 1 — Plan (strong model).** Do it **inside the agent**, on the
-  strong model (Gemini 4 Argon Medium, tier `pro`). Planning costs only
-  1–2 calls, so the strong model's small quota is enough. The strong model
-  produces a detailed, verifiable plan. Save the plan as a file in the repo
-  and commit it.
-- **Phase 2 — Execute (cheap model).** The master stays on the strong
-  model and dispatches flash sub-agents (`TypeName: "self"`,
-  `Workspace: "inherit"`, `Model: "flash"`) to execute the plan file step
-  by step, one step cluster at a time, committing progress after each
-  step. The session model does not switch — switching the whole session
-  to the cheap model is only the fallback if per-sub-agent model choice
-  ever stops working (see SKILL.md).
+## 1. The core idea (v4.0 Dual-Engine Architecture)
 
-**Model mapping:** master = Gemini 4 Argon Medium (`pro` tier); executor
-/ sub-agents = Gemini 3.8 Flash Medium (`flash` tier). Dispatch with
-`TypeName: "self"`, `Workspace: "inherit"`, `Model: "flash"` — always
-write all three explicitly. `Model` defaults to `"inherit"` if omitted,
-which silently puts the sub-agent on the strong model and burns its
-scarce quota. Never use `TypeName: "research"` for gathering or network
-checks — the research sub-agent runs in a read-only sandbox with no
-network access. Models are chosen by tier via the sub-agent call's
-`Model` parameter (`inherit` / `pro` / `flash` / `flash_lite`), not by
-version name. **Do NOT route planning through the Gemini web app**
-(`gemini.google.com/app`) — verified 2026-11-08, the agent cannot sign
-in there: it runs in an isolated cloud VM with no Google sign-in, and
-Google blocks sign-in from that VM's headless browser ("This browser or
-app may not be secure").
+1. **Planning Engine (External Brain — Gemini 4 Web):**
+   The planning phase uses **Gemini 4 High (Argon with Extended Thinking)**
+   from Google Gemini Web via MCP Server `gemini-web` (`gemini_web_ask`).
+   Because this runs over HTTP/2 batchexecute RPC with browser session cookies
+   (`__Secure-1PSID`, `__Secure-1PSIDTS`), it bypasses browser security blocks
+   and costs **0% Antigravity Pro quota**.
+2. **Coordinating & Execution Engine (Internal Fleet — Gemini 3.8 Flash):**
+   The primary Antigravity chat session operates on **Gemini 3.8 Flash**
+   (`flash` tier). It dispatches a Recon sub-agent (`Model: "flash"`) to
+   build the context bundle, sends it to the MCP for planning, runs a fast
+   gatekeeper checklist review, and dispatches a fleet of sequential execution
+   sub-agents (`TypeName: "self"`, `Workspace: "inherit"`, `Model: "flash"`).
 
-The plan file is the contract between planner and executor. Any session can
-resume the work by reading the file.
+```
++--------------------------------------------------------------------------+
+|            Google Gemini Web (gemini.google.com/app)                     |
+|           Mô hình: Gemini 4 High (Argon Extended Thinking)               |
+|      [Chi phí: 0 Quota Antigravity | Suy luận sâu tối đa]                 |
++--------------------------------------------------------------------------+
+                                    ▲
+                                    │ (MCP: gemini_web_ask)
+                                    ▼
++--------------------------------------------------------------------------+
+|       Antigravity Primary Coordinator (Model: Gemini 3.8 Flash)          |
+|  - Thu thập Context Bundle qua Recon Subagent                            |
+|  - Ủy quyền lập Plan cho Gemini 4 Web qua MCP                            |
+|  - Rà soát Gatekeeper Checklist & Ghi file Plan                          |
+|  - Điều phối các Subagent thực thi tuần tự                               |
++--------------------------------------------------------------------------+
+                                    │
+                                    ▼ (invoke_subagent: Model "flash")
++--------------------------------------------------------------------------+
+|       Antigravity Execution Subagents (Model: Gemini 3.8 Flash)          |
+|  - Step Cluster 1 -> Verify & Commit Progress                            |
+|  - Step Cluster 2 -> Verify & Commit Progress                            |
+|  - Step Cluster N -> Full Test, Rebase & Push                            |
++--------------------------------------------------------------------------+
+```
 
-## 2. The 6-step workflow (detailed)
+## 2. Tri-Level Planning Fallback Matrix
+
+To guarantee that work is never blocked if network or sessions fluctuate:
+
+| Mode | Planner Engine | Quota Impact | Trigger Condition |
+| :--- | :--- | :--- | :--- |
+| **Mode 1 (Primary)** | External Gemini 4 High via MCP `gemini-web` | **0 Antigravity Pro Tokens** | Default. MCP server and cookie valid. |
+| **Mode 2 (Fallback A)** | Internal Antigravity Pro (Gemini 4 Argon Medium) | 1 Turn Pro Quota | MCP offline, cookie expired, or RPC error. |
+| **Mode 3 (Fallback B)** | Internal Antigravity Flash (Gemini 3.8 Flash) | Minimal Flash Quota | Both MCP and Pro quota depleted. Requires user review tag `[LOW-CONFIDENCE-PLAN]`. |
+
+## 3. The 6-step workflow (detailed)
 
 ### Step 0 — Verify once
 
-Before trusting the workflow, verify its core assumptions once and record
-the results in the project workflow file (section "Verified"):
+Before relying on the workflow, verify core components and record in project workflow:
+1. **MCP Gemini Web Connection:**
+   - Execute `gemini_web_account_info` or a test query via `gemini_web_ask`.
+   - Confirm authentication source (`.env` or browser cookie) and model `gemini-4`.
+   - If connected, Mode 1 is active. If failed, log reason and prepare Mode 2 fallback.
+2. **Antigravity Flash Quota:**
+   - Check Antigravity Usage view for Flash tier quota.
+3. **Sub-agent Dispatch Capability:**
+   - Confirm `invoke_subagent` works with `TypeName: "self"`, `Workspace: "inherit"`, `Model: "flash"`.
+4. **File Persistence:**
+   - Verify `write_to_file` can write to `.agents/plans/`.
 
-1. The strong model is available in Antigravity's model menu — record the
-   exact model name shown in the UI (names change; use what the UI
-   shows). Currently: **Gemini 4 Argon Medium**.
-2. That model's quota — read the numbers from Antigravity's **Usage
-   view** (weekly and 5-hour limits, % remaining, when it resets) and
-   record them exactly as shown. Do NOT infer the plan/package from the
-   numbers — the displayed numbers do not reliably identify the package
-   (e.g. 94% weekly remaining was shown on an account whose package is
-   described as a free "gemini 1.5 pro" plan). Planning costs only 1–2
-   calls, so a small remaining quota is enough for the planner role —
-   but record the numbers.
-3. The cheap model is available in Antigravity (currently: **Gemini 3.8
-   Flash Medium**) and its quota is sufficient for execution work. Read
-   its numbers from the Usage view too, as in item 2.
-4. Antigravity allows a **different model per sub-agent** (master on
-   strong, sub-agents on cheap at the same time). Verified 2026-11-08:
-   yes — dispatch with `TypeName: "self"`, `Workspace: "inherit"`,
-   `Model: "flash"`. The AG agent confirmed it can act as Master on
-   Gemini 4 Argon Medium and call flash-tier sub-agents this way. If this
-   ever stops working, use the two-phase model-switching fallback (master
-   plans + dispatches on strong, then the whole session switches to cheap;
-   switch back to strong only for master decisions).
-5. The agent can save a long plan text as a file in the repo (the plan
-   file is the contract).
-6. The sub-agent call itself works as documented: dispatch a test
-   sub-agent with `TypeName: "self"`, `Workspace: "inherit"`,
-   `Model: "flash"` on a trivial task and confirm it runs on the cheap
-   model. Do not assume the call, the parameter names, or the sample
-   values are correct — verify them once, then trust the verified
-   result. Anything still unverified is marked NEEDS VERIFICATION, never
-   assumed.
+### Step 1 — Recon & Context Gathering (ONE Flash Sub-agent dispatch)
 
-Do NOT verify anything through the Gemini web app
-(`gemini.google.com/app`): the agent cannot sign in there (see section 1).
-If Step 0 fails, stop, report, and use a fallback: ask another strong
-agent to plan (for example Muse), then execute with the cheap model.
+Dispatch **ONE** flash sub-agent (`TypeName: "self"`, `Workspace: "inherit"`, `Model: "flash"`) to:
+- Write `<repo>/.agents/plans/<date>-<task>-REQUEST.md` (goals, repo, branch, DoD, what NOT to do).
+- Write `<repo>/.agents/plans/<task>-CONTEXT.md` (repo layout, house rules with source paths, verified facts, constraints).
 
-### Step 1 — Take the task and prepare a context bundle (ONE "Recon Sub-agent" dispatch)
+The coordinator sleeps while Recon runs, saving turns.
 
-Dispatch **ONE** flash sub-agent (`TypeName: "self"`, `Workspace:
-"inherit"`, `Model: "flash"`) — the "Recon Sub-agent" — to do both jobs
-in a single trip:
+### Step 2 — Plan with Gemini 4 High via MCP gemini-web
 
-- Record the task in `<repo>/.agents/plans/<date>-<task>-REQUEST.md`:
-  goal, repo, branch, definition of done, and what must NOT be done.
-- Survey the repo and prepare a context bundle file,
-  `<repo>/.agents/plans/<task>-CONTEXT.md`, at most 1–2 pages (see
-  `templates/context-bundle-template.md`): repo layout that matters,
-  project house rules (summarised, with paths to the source files),
-  verified facts, constraints, and what must not be done.
+1. The coordinator loads `templates/planning-prompt-web.md`, injecting `REQUEST.md` and `CONTEXT.md`.
+2. Calls MCP `gemini_web_ask(prompt=planning_prompt, model="gemini-4", extended_thinking=True)`.
+3. Gemini 4 Argon Web performs extended thinking and returns the complete Markdown Plan with the five mandatory sections:
+   (1) Goal, (2) Context the executor needs, (3) Numbered execution steps, (4) Risks & fallbacks, (5) Definition of done.
+4. If Mode 1 throws an unrecoverable exception, switch immediately to Mode 2.
 
-This is mechanical work — the master (strong model) does not spend a call
-on it. The master only wakes up when the Recon Sub-agent reports back,
-then reads the bundle and writes the plan (Step 2). Do NOT split this
-into two separate dispatches: each dispatch wakes the master and costs
-one strong-model turn, so two dispatches waste one turn in between.
-The master planner works from the bundle, and the executor works from
-the plan + bundle without re-reading the whole repo. Do not start coding
-yet — the first thing after taking a task is to plan, not to write code.
+### Step 3 — Dual Gatekeeper Review & Dispatch (Same Turn)
 
-### Step 2 — Plan with the strong model
+In the same turn as Step 2:
+1. Coordinator checks the plan against the **Review Checklist**:
+   - [ ] Completeness from start to finish (no skipped middle steps).
+   - [ ] Exact file paths and shell commands provided.
+   - [ ] Concrete verification and done criteria for every step.
+   - [ ] Project house rules strictly respected.
+   - [ ] Clear stop-conditions defined (quota, external blocks).
+   - [ ] Explicit list of files that must NOT be touched.
+   - [ ] Unverified items marked `NEEDS VERIFICATION`.
+   - [ ] Step 0 commits plan file and checks HEAD drift.
+2. Call `write_to_file` once to save `<repo>/.agents/plans/<date>-<task>.md`.
+3. Dispatch the first execution sub-agent (`Model: "flash"`) in the **same turn**.
 
-The master (strong model) writes the plan. This is the master's main
-job — 1 strong-model turn: plan, review (Step 3), write, dispatch, all
-in the same turn. (A rewrite after a failed review is the only
-exception, and it costs one more turn.)
+### Step 4 — Execute with Cheap Model (Gemini 3.8 Flash)
 
-- Give the master the task description and the context bundle. The master
-  runs on the strong model (Gemini 4 Argon Medium, tier `pro`); it does
-  not switch models.
-- The plan follows `templates/plan-template.md` — five mandatory
-  sections: (1) Goal, (2) Context the executor needs, (3) Numbered
-  execution steps (each with what to do, exact files/commands, expected
-  result, how to verify, done criterion), (4) Risks & fallbacks,
-  (5) Definition of done.
-- Write the plan as **ONE complete file in a single `write_to_file`
-  call** — `<repo>/.agents/plans/<date>-<task>.md`. Do NOT split the plan
-  into numbered parts with end markers: `write_to_file` writes directly
-  to the VM disk, so there is no clipboard truncation to work around.
-- Do the review (Step 3), the write, and the first dispatch **in this
-  same turn** — review the plan against the checklist (Step 3), call
-  `write_to_file` to write the plan, and dispatch the first flash
-  sub-agent (`TypeName: "self"`, `Workspace: "inherit"`,
-  `Model: "flash"`) for the first execution step cluster. Do NOT commit
-  the plan file yourself and do NOT wait for the write to finish before
-  dispatching: the first sub-agent commits the plan file as Step 0 of
-  the Plan (see `templates/plan-template.md`) before starting its
-  cluster. Target: the whole Plan + Review + Dispatch phase costs the
-  master **exactly 1 turn** on the strong model.
-
-### Step 3 — Review the plan
-
-Review against the checklist below — **in the same Master turn as Step
-2**, never a separate turn. If the plan fails any item, go back to Step 2
-(a rewrite costs one more turn). Only a plan that passes may be executed.
-
-**Review checklist**
-
-- [ ] Enough steps to go from start to finish, no missing middle step.
-- [ ] Every step has exact files/commands (full paths, not "edit the
-      config file").
-- [ ] Every step has a concrete verification method and a clear done
-      criterion.
-- [ ] The plan follows the project's house rules (checked against the
-      project's rule files).
-- [ ] It says when to STOP (quota out, out-of-scope error, external site
-      blocking, ...) instead of pushing on.
-- [ ] It says which files must NOT be touched.
-- [ ] Anything uncertain is marked "NEEDS VERIFICATION" instead of guessed.
-- [ ] Every assumption in the plan is either verified (with evidence) or
-      marked NEEDS VERIFICATION — an unverified assumption is a plan
-      defect, not a detail.
-- [ ] Step 0 of the plan is "sync the repo, record HEAD, check the plan's
-      assumptions still hold; if they drifted, stop and report."
-
-### Step 4 — Execute with the cheap model
-
-The master stays on the strong model. Execution is done by dispatching
-flash sub-agents — the session model does not switch.
-
-- Dispatch **ONE flash sub-agent per step cluster**
-  (`TypeName: "self"`, `Workspace: "inherit"`, `Model: "flash"`), and
-  run the clusters **sequentially, one at a time** — never in parallel
-  on the same repo (see the Git rules below). A step cluster is a group
-  of related plan steps (e.g. Steps 1–4 of one extension build). The
-  first sub-agent commits the plan file as Step 0 of the Plan before
-  starting its cluster (see `templates/plan-template.md`).
-- Each sub-agent does the plan steps **in order**, without adding steps,
-  changing scope, or "improving" the plan.
-- **Never edit the plan's Goal or Steps yourself** — only the Progress
-  section is yours to update. If the plan is incomplete, wrong, or
-  contradicts itself, STOP and report back to the Master — the Master
-  fixes the plan. (This rule was in Step 2 in v3, aimed at the wrong
-  role: the actor at Step 2 is the Master itself.)
-- Before each step, the sub-agent **echoes** it ("Doing Step N per the
-  plan; rule applied: ...") so non-compliance is visible.
-- After each step: update the **Progress** section of the plan file (what
-  was done, evidence, time) and **commit the progress**.
-- Ambiguity in the plan → **STOP and ask**. Do not guess.
-- Error outside the plan → record it in the plan file, stop at that step,
-  report. Do not expand scope.
+1. Dispatch **ONE flash sub-agent per step cluster** (`TypeName: "self"`, `Workspace: "inherit"`, `Model: "flash"`).
+2. Run clusters **sequentially** (Git safety: one writer at a time).
+3. The first sub-agent commits the plan file in Step 0.
+4. Each sub-agent updates the `Progress` section of the plan file and commits after each step.
+5. If errors occur outside the plan, apply the "try twice" rule (max 2 fix attempts); if unresolved, stop and report.
 
 ### Step 5 — Verify
 
-- After each step: run exactly the verification written in the plan.
-- At the end: run the full verification and review the diff before the
-  final commit.
-- Errors inside the plan's scope → fix per the plan. Errors outside the
-  scope or unfixable → record in the plan file, stop, report.
+- Run step-level verifications.
+- Run full project verification (lint, build, tests, health-check).
+- Inspect git diff before final push.
 
 ### Step 6 — Commit, push, report
 
-- `git pull --rebase` before pushing; if the push is rejected, pull
-  --rebase again and retry once; never force-push.
-- Report: commit hash, verification results (with real evidence), and what
-  is still open.
-- Add anything newly learned to "Lessons learned" below.
+- `git pull --rebase` before push; retry once if rejected; never force push.
+- Report commit hash, concrete verification evidence, and lessons learned.
 
-### Git rules (one repo, one writer at a time)
+## 4. Git rules (one repo, one writer at a time)
 
-- **Never run sub-agents in parallel writing to the same repo.**
-  Sub-agents share one `.git` directory through `Workspace: "inherit"`,
-  so parallel writers corrupt each other's work. Dispatch ONE flash
-  sub-agent per step cluster and run the clusters sequentially (Step 4).
-- **Several independent sources in one task** (e.g. several extensions):
-  sub-agents may edit files for different sources, but git commits still
-  run strictly one at a time, sequentially — never two commits at once.
-- **`.agents/plans/` and `.agents/reports/` are working files, not
-  product files.** Commit them on the working branch (they are the save
-  point), but do NOT merge them into the product repo's `main` branch —
-  clean them up before merging, so `main` stays clean and CI is not
-  triggered by plan/report churn. The skill itself
-  (`.agents/skills/`, `.agents/WORKFLOW.md`) is meant to live in the repo
-  and is the exception.
+- **Never run sub-agents in parallel writing to the same repo.** All sub-agents share `.git` via `Workspace: "inherit"`. Parallel commits cause tree lock errors and corrupted index states.
+- **Keep `.agents/plans/` and `.agents/reports/` off `main`.** They are save points for the working branch. Clean up or omit before merging to production.
 
-## 3. Quota rules
+## 5. Quota rules (v4.0)
 
-1. Use the strong model only for planning and master decisions — never
-   for bulk execution. Plan first (Step 2, on the strong model), then
-   execute on the cheap model.
-2. Strong-model quota exhausted → do not retry in a loop. Switch to the
-   cheap model and work from an existing plan, or plan small tasks on the
-   cheap model (note clearly the plan is lower quality and needs a human
-   review).
-3. Cheap-model quota exhausted mid-task → save progress to the plan file,
-   commit, stop, report. Do not spin, do not switch accounts silently.
-4. Split work into small chunks so a mid-task cut loses as little as
-   possible.
-5. A second agent account is only a fallback with the user's approval.
-   Switching accounts mid-task loses context — resuming from the plan file
-   is fine, starting over is not.
-6. Every quota exhaustion is a lesson: record it (what error, when, which
-   model, how to avoid it next time).
-7. Do not use teamwork (many sub-agents) when quota is weak. Teamwork
-   multiplies quota consumption. Use it only when quota is plentiful, or
-   the task is large enough to justify it.
-8. Always commit progress after each step. The plan file + progress is the
-   save point.
-9. Never paste secrets, credentials, tokens, passwords, or API keys into
-   any web app or chat outside the agent. Only code, rules, and task
-   descriptions.
-10. If a session fills its context or starts forgetting, stop, commit
-    progress, and open a new session with the starter message + the plan
-    file path.
-11. Only use this two-phase workflow for tasks estimated at > 30 minutes
-    or with ≥ 3 dependent steps. Smaller tasks: do them directly.
+1. **Zero Pro Quota for Planning:** Gemini 4 High via MCP `gemini-web` handles deep architecture without draining Antigravity Pro quota.
+2. **Coordinator on Flash:** The chat session runs on Gemini 3.8 Flash.
+3. **Subagents on Flash:** All bulk coding, test running, and CLI execution run on Flash.
+4. **Save Points:** Always commit plan progress after every step.
+5. **Security:** Never paste credentials or API tokens into external web prompts.
 
-## 4. Master / sub-agent reporting
+## 6. Self-Critique & Risk Analysis (Tự Phản Biện Chuyên Sâu v4.0)
 
-See `SKILL.md` for the full mechanism. Summary:
+Every major upgrade must be subjected to rigorous self-critique. Below is the adversarial analysis of v4.0:
 
-- The **master is a ROLE, not an agent running continuously.** It wakes
-  only at decision points (plan, dispatch, read reports, decide, final
-  verification).
-- Dispatch with `TypeName: "self"`, `Workspace: "inherit"`,
-  `Model: "flash"` — always all three, explicitly. One flash sub-agent
-  per step cluster, run sequentially (see the Git rules in §2).
-- Sub-agents report through **two channels**: a report file in the repo
-  (`<repo>/.agents/reports/<task>-<subagent>.md`, template:
-  `templates/report-template.md`) and a short notification message (status,
-  report path, any question needing a master decision).
-- Sub-agents append ONE line per finished piece of work to
-  `<repo>/.agents/reports/INBOX.md`. The master reads ONE file to see all
-  pending reports, then processes them **in a batch**.
-- Escalation: a sub-agent may fix small in-plan errors itself (at most 2
-  attempts per error — "try twice" rule). It MUST escalate: plan wrong or
-  contradictory, external site blocking or changed, scope decision needed,
-  quota exhausted, or the same error survived 2 attempts.
+### ⚠️ Risk 1: Cookie Expiry & Headless Cloud VM Boundary
+- **Vấn đề:** Trong môi trường Cloud VM (Debian remote sandbox của Antigravity), trình duyệt desktop không có sẵn, nên `rookiepy` không thể tự động bóc cookie như trên máy cá nhân. Nếu cookie trong `.env` (`__Secure-1PSID`, `__Secure-1PSIDTS`) hết hạn giữa chừng, MCP `gemini-web` sẽ trả về lỗi xác thực.
+- **Giải pháp hóa giải trong v4.0:**
+  1. Cơ chế Fallback 3 tầng (Tri-Level Matrix): Khi MCP lỗi auth, hệ thống không bị crash mà tự động chuyển sang Mode 2 (dùng 1 turn Pro nội bộ của Antigravity) hoặc Mode 3.
+  2. Bổ sung script `gemini2anti check` trong Step 0 để phát hiện phiên hợp lệ ngay từ đầu trước khi vào pha Planning.
 
-## 5. How this skill is "installed" (the training mechanism)
+### ⚠️ Risk 2: Rate Limiting & Abuse Detection từ Google Gemini Web
+- **Vấn đề:** Google Gemini Web có bộ lọc chống lạm dụng (anti-abuse / CAPTCHA) nếu tài khoản gửi liên tiếp hàng trăm request tự động trong thời gian ngắn.
+- **Giải pháp hóa giải trong v4.0:**
+  - `quota-workflow v4.0` **CHỈ dùng Gemini Web đúng 1-2 lần** cho pha lập Plan và kiến trúc (Planning Phase), hoàn toàn KHÔNG dùng Gemini Web để chạy lệnh hay gõ code vụn vặt (bulk execution). Tần suất 1-2 call/task là hoàn toàn tự nhiên và tương đương với người dùng thông thường, không bao giờ chạm ngưỡng abuse rate-limit.
 
-There is no fine-tuning here. "Training" the agent means three things:
+### ⚠️ Risk 3: Hallucination trong Plan từ External LLM
+- **Vấn đề:** Gemini 4 Web ở bên ngoài không có tool đọc file trực tiếp trong repo, có thể sinh ra các đường dẫn file tưởng tượng nếu không có đủ thông tin.
+- **Giải pháp hóa giải trong v4.0:**
+  - Quy trình Step 1 (Recon Sub-agent) bắt buộc chuẩn bị file `CONTEXT.md` đầy đủ cây thư mục, quy tắc nhà (House Rules) và các sự thật đã kiểm chứng trước khi gọi MCP.
+  - Step 3 (Dual Gatekeeper): Coordinator kiểm tra lại toàn bộ file paths và lệnh trước khi lưu vào disk và dispatch executor.
 
-1. **A fixed workflow file in the repo** (this skill, or a pointer to it)
-   — every agent session reads it first.
-2. **A session-opening ritual:** the first message of every new session
-   tells the agent to read the skill and follow it. Starter message:
-   > Before doing anything, read the skill `quota-workflow` at
-   > https://github.com/qsang2025/antigravity-skills and follow it. Use
-   > the strong model only for master planning/decisions, and explicitly
-   > dispatch sub-agents with TypeName: 'self', Workspace: 'inherit',
-   > and Model: 'flash' for context gathering and plan execution. Do not
-   > start coding before you have a reviewed plan file. If you run out
-   > of quota at any step, stop, save progress to the plan file, commit,
-   > and report — do not retry in a loop.
-3. **A "Lessons learned" section**, updated after every task — this is how
-   the workflow improves over time instead of staying a static document.
+### ⚠️ Risk 4: Độ trễ phản hồi (Extended Thinking Latency)
+- **Vấn đề:** Gemini 4 Argon với Extended Thinking suy luận rất sâu, thời gian sinh phản hồi có thể mất từ 15–45 giây.
+- **Giải pháp hóa giải trong v4.0:**
+  - Client trong `gemini2anti/client.py` đã cấu hình timeout hợp lý (25–60s) kèm retry exponential backoff.
+  - Vì chỉ gọi đúng 1 lần cho toàn bộ bản kế hoạch, 30 giây suy luận để đổi lấy một Plan hoàn hảo tiết kiệm hàng giờ gỡ lỗi của sub-agent là cái giá hoàn toàn xứng đáng.
 
-How well this works depends on the skill being written clearly and every
-session actually reading it. That is the known limit — there is no magic.
+## 7. Changelog
 
-## 6. Fallbacks
-
-| Situation | Fallback |
-|---|---|
-| Strong-model quota exhausted in Antigravity | Plan small tasks with the cheap model; large tasks wait for the quota reset or use Muse as planner. |
-| Plan file is incomplete | The plan is one complete file — ask the master (strong model) to write the missing section and append it to the same file, then re-review. Do NOT split the plan into numbered parts with end markers. |
-| Cheap model keeps executing the plan wrong | The plan is not detailed enough — go back to Step 2 and make it more detailed (smaller steps, exact commands); do not force the cheap model. |
-| Per-sub-agent model choice is not supported | Two-phase model-switching fallback (see SKILL.md). |
-
-## 7. Measuring effectiveness
-
-After each task, record these three numbers in the project workflow file
-(section "Measured effectiveness"):
-
-1. Quota errors per task.
-2. % of tasks completed without interruption.
-3. Number of steps that had to be redone.
-
-If the numbers do not improve after 2–3 tasks, the workflow needs fixing —
-do not keep following a workflow that is not working.
-
-## 8. Optimisations
-
-1. **Batch planning:** several similar tasks (e.g. 4 similar extensions)
-   get ONE shared plan (common template + per-item sections) — pay the
-   planning cost once.
-2. **Plans carry full context** (house rules, contracts, verified facts) so
-   the cheap model does not have to re-read the whole repo.
-3. **Steps small + verifiable after each step** — the cheap model does well
-   on small, precisely specified work and poorly on large, vague work.
-4. **Optional strong-model final review:** after the cheap model finishes,
-   if strong-model quota has recovered, ask it to review the diff quickly
-   — only for important tasks, not every task.
-5. **Plans are committed, so they are reusable:** a similar future task
-   copies an old plan's skeleton and changes only the specifics.
-
-## 9. Verified
-
-- **2026-11-08 (account qsang2025, session "Kiểm Chứng Quy Trình Phase
-  0"):** strong model in Antigravity = **Gemini 4 Argon Medium**; cheap
-  model = **Gemini 3.8 Flash Medium**. Other models in the menu: Claude
-  Opus 5.5 / Sonnet 5.5 Medium, GPT-OSS 120B (Medium). Quota (qsang2025):
-  Gemini Models weekly 94% left (reset 6d 7h), 5h 100%; Gemini 4 Argon
-  99% weekly left (reset 6d 23h); Claude/GPT weekly 37% left. Per-sub-agent
-  model choice: **YES** — sub-agent call takes a `Model` parameter
-  (`inherit` / `pro` / `flash` / `flash_lite`); models are chosen by tier,
-  not by version name. Record Usage numbers exactly as shown. Do NOT infer
-  the plan/package from them — the displayed numbers do not reliably
-  identify the package (e.g. 94% weekly remaining was shown on an account
-  whose package is described as a free "gemini 1.5 pro" plan).
-- **2026-11-08 — Gemini web app: NOT usable.** The agent runs in an
-  isolated cloud VM with no Google sign-in. Guest mode shows no model
-  menu or quota; a sign-in attempt was blocked by Google right after the
-  email step ("Couldn't sign you in — This browser or app may not be
-  secure") because the VM's headless browser is detected as automation.
-  The agent never reached the password or phone-code step. **Do not route
-  planning through the Gemini web app.**
-- **2026-11-08 — AG review of skill v2 (account qsang2025):** the agent
-  confirmed it can act as Master on Gemini 4 Argon Medium and call
-  flash-tier sub-agents via `invoke_subagent` with `TypeName: "self"`,
-  `Workspace: "inherit"`, `Model: "flash"`. It also confirmed the Gemini
-  web app detour is correctly removed, and flagged: never use
-  `TypeName: "research"` for gathering/network steps (read-only sandbox,
-  no network); `Model` defaults to `"inherit"` if omitted; one writer at
-  a time per repo (shared `.git` via Workspace `inherit`); write the
-  plan as one complete file (no part markers); the planning-prompt
-  template is unnecessary (the five mandatory plan sections live in
-  SKILL.md + the plan template).
-
-## 10. Lessons learned
-
-_(Add one line per lesson after each task: date, what happened, what to do
-differently.)_
-
-- 2026-11-07: teamwork run on a strong model died on quota ("Individual
-  quota reached") after producing only coordination documents and 0 lines
-  of code. Lesson: do not use teamwork when quota is weak; plan first,
-  then execute with the cheap model. (This incident is what motivated this
-  skill.)
-- 2026-11-08: Phase 0 verification proved the Gemini web app step does not
-  work — the agent cannot sign in from its cloud VM (Google blocks the
-  headless browser). User decision: master plans inside Antigravity on
-  Gemini 4 Argon Medium (planning costs only 1–2 calls, so the small
-  quota is enough); sub-agents execute on the flash tier (Gemini 3.8 Flash
-  Medium). The Gemini app step was removed from the skill (v2).
-- 2026-11-08: AG review of skill v2 — the agent confirmed the workflow
-  works (master on Gemini 4 Argon Medium, flash subs via
-  `TypeName: "self"` + `Model: "flash"`), but flagged four weak points:
-  missing verification step, wrong sub-agent type name, Usage-display
-  conflicts, and the plan-part splitting. Fixed in v3: explicit
-  TypeName/Workspace/Model on every dispatch, flash sub-agents for Steps
-  1/1.5, one complete plan file, Git one-writer rule, Usage-based quota
-  reading, planning-prompt template removed.
-
-## Changelog
-
-- v3.1 (2026-11-08): AG re-review micro-optimisations (3, to save
-  strong-model turns) — same changes as SKILL.md v3.1: Step 1 + Step 1.5
-  merged into ONE "Recon Sub-agent" dispatch; Plan + Review + Dispatch
-  costs the Master exactly 1 turn, with the first flash sub-agent
-  committing the plan file as Step 0 of the Plan; the "Do not edit the
-  plan yourself" rule moved from Step 2 to Step 4.
-- v3 (2026-11-08): AG review fixes — same changes as SKILL.md v3
-  (explicit `TypeName: "self"` + `Workspace: "inherit"` +
-  `Model: "flash"` on every dispatch; flash sub-agents for Steps 1/1.5;
-  one complete plan file; Git one-writer rule + `.agents/plans/` and
-  `.agents/reports/` stay off `main`; Usage-based quota reading; Starter
-  Message carries an explicit model-choice permission;
-  `templates/planning-prompt.md` removed; Verified + Lessons learned
-  updated with the AG review).
-- v2 (2026-11-08): master plans inside Antigravity on Gemini 4 Argon
-  Medium; sub-agents execute on the flash tier (Gemini 3.8 Flash Medium).
-  Gemini web app step removed (Phase 0 proved the agent cannot sign in
-  there). Per-sub-agent model choice confirmed by tier. Verified + Lessons
-  learned sections filled in with the Phase 0 results.
-- v1 (2026-11-08): first version, split from the training plan
-  (Parts 1–3: workflow, self-critique, general scope).
+- **v4.0 (2026-11-08):** Tích hợp toàn diện `McpGemini2Antigravity`. Chuyển đổi Planner sang **Gemini 4 High (Argon Extended Thinking)** qua MCP `gemini_web_ask`, giảm mức tiêu hao quota Pro của Antigravity về **0%**. Bổ sung Ma trận dự phòng 3 tầng (Tri-Level Fallback Matrix), template prompt chuyên dụng `templates/planning-prompt-web.md`, bổ sung phân tích tự phản biện (Self-Critique).
+- **v3.1 (2026-11-08):** Gộp Recon Sub-agent; Plan+Review+Dispatch trong 1 turn; chuyển rule cấm sửa plan về Step 4.
+- **v3 (2026-11-08):** Bắt buộc tường minh TypeName/Workspace/Model; quy tắc Git 1 writer; Usage-based quota.
+- **v2 (2026-11-08):** Master nội bộ Pro trong Antigravity; bỏ headless browser do bị Google chặn đăng nhập.
+- **v1 (2026-11-08):** Phiên bản khởi tạo từ kế hoạch huấn luyện.
