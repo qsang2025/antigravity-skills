@@ -13,6 +13,24 @@ workflow document, templates, and worked examples.
 | Skill | What it does | When to use it |
 |---|---|---|
 | [quota-workflow](quota-workflow/SKILL.md) | Plan with a strong model, execute with a cheap model, never die on quota | Any task estimated at > 30 minutes or with ≥ 3 dependent steps, when the strong model's quota is scarce |
+| [docx](.agents/skills/docx/SKILL.md) | Create, read, edit, and analyse Word documents and templates | Any task that produces or changes a .docx or .dotx file |
+| [xlsx](.agents/skills/xlsx/SKILL.md) | Create, read, edit, and fix spreadsheets, with formulas | Any task that produces or changes a .xlsx, .xlsm, or .csv file |
+| [pptx](.agents/skills/pptx/SKILL.md) | Create, read, edit, and analyse slide decks and templates | Any task that produces or changes a .pptx or .potx file |
+| [pdf](.agents/skills/pdf/SKILL.md) | Read, extract, merge, split, rotate, create, and fill PDFs | Any task that reads or produces a .pdf file |
+
+## Document skills (Anthropic, Apache 2.0)
+
+The four document skills live in `.agents/skills/` in Antigravity's
+native layout, copied verbatim from Anthropic's official repo
+https://github.com/anthropics/skills on 2026-11-12. Install them
+globally on Windows by copying the four folders to
+`%USERPROFILE%\.gemini\config\skills\`, or per project by copying
+them to `<project>\.agents\skills\`. Full steps, including the
+differences from Claude Code, are in
+[.agents/skills/README.md](.agents/skills/README.md). House rules for
+FrieslandCampina documents are kept separate in
+[.agents/skills/FRIESLANDCAMPINA-ADAPTER.md](.agents/skills/FRIESLANDCAMPINA-ADAPTER.md),
+never inside the copied skill files.
 
 ## How to use a skill in a project
 
