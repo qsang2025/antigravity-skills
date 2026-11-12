@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gemini2anti"
+version = "1.0.0"
+description = "Cầu nối tích hợp model AI từ Google Gemini Web (gemini.google.com/app) vào Antigravity & agy CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "NDKBVH" }
+]
+license = { text = "MIT" }
+
+dependencies = [
+    "gemini-webapi>=2.1.1",
+    "rookiepy>=0.5.6",
+    "mcp>=1.0.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.27.0"
+]
+
+[project.scripts]
+gemini2anti = "gemini2anti.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["gemini2anti*"]

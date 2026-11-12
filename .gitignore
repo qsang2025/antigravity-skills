@@ -1,0 +1,61 @@
+# ==============================================================================
+# BẢO MẬT VÀ QUẢN LÝ TÀI NGUYÊN (GITIGNORE)
+# ==============================================================================
+
+# TUYỆT ĐỐI KHÔNG PUSH THÔNG TIN ĐĂNG NHẬP / COOKIES
+.env
+.env.local
+*.env
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# OS specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs & Temporary files
+*.log
+scratch/
+temp/
+
+# Local Agent Workspace & Prompt History (giữ riêng tư cục bộ, không đẩy lên Git)
+.agent/
+
+# Lệnh nội bộ cá nhân (giữ trên máy cục bộ, không phát hành trên Git)
+workflows/g4.md
+skills/g4/
+
+# Quản lý task nội bộ cá nhân (giữ riêng tư cục bộ, không đẩy lên Git)
+TASKS.md
+
+# Script đẩy lên GitHub cá nhân (giữ trên máy cục bộ, không phát hành trên Git)
+day_len_github.bat
+day_len_github.ps1
+
+
