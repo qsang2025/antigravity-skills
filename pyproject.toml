@@ -3,12 +3,13 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gemini2anti"
+name = "antigravity-skills"
 version = "1.0.0"
-description = "Cầu nối tích hợp model AI từ Google Gemini Web (gemini.google.com/app) vào Antigravity & agy CLI"
+description = "Bộ công cụ và thư viện kỹ năng toàn diện cho Google Antigravity & Cầu nối Gemini 4 Web (Argon Extended Thinking)"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
+    { name = "Dương Nguyễn Quốc Sáng" },
     { name = "NDKBVH" }
 ]
 license = { text = "MIT" }
